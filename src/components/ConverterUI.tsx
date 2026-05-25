@@ -146,6 +146,8 @@ const ConverterUI: React.FC = () => {
     // Get Telegram User ID if available
     const tg = (window as any).Telegram?.WebApp;
     const telegramUserId = tg?.initDataUnsafe?.user?.id;
+    console.log('Client: Telegram User ID found:', telegramUserId);
+    
     if (telegramUserId) {
       formData.append('telegramUserId', telegramUserId.toString());
     }

@@ -38,28 +38,38 @@ if (botToken && !disableBot) {
     console.error(`Tg Error for ${ctx.updateType}`, err);
   });
 
-  // Use Webhook instead of Polling to avoid 409 Conflict
-  if (appUrl) {
-    const secretPath = `/telegraf/${bot.secretPathComponent()}`;
-    app.use(bot.webhookCallback(secretPath));
-    
-    bot.telegram.setWebhook(`${appUrl}${secretPath}`).then(() => {
-      console.log(`Telegram bot webhook set to: ${appUrl}${secretPath}`);
-    }).catch(err => {
-      console.error('Failed to set Telegram webhook:', err);
-    });
-  } else {
-    // Fallback to polling ONLY in development
-    if (process.env.NODE_ENV !== 'production') {
-      bot.launch().then(() => {
-        console.log('Telegram bot started via polling (Dev Mode)');
-      }).catch(err => {
-        console.error('Failed to start Telegram bot polling:', err);
-      });
-    } else {
-      console.warn('Bot: RENDER_EXTERNAL_URL not found, webhook not set.');
+  const setupBot = async () => {
+    try {
+      // Remove any existing webhooks to avoid 409 Conflict
+      await bot?.telegram.deleteWebhook();
+      console.log('Previous Telegram webhook deleted');
+
+      // Use Webhook instead of Polling to avoid 409 Conflict
+      if (appUrl) {
+        const secretPath = `/telegraf/${bot?.secretPathComponent()}`;
+        app.use(bot!.webhookCallback(secretPath));
+        
+        await bot?.telegram.setWebhook(`${appUrl}${secretPath}`);
+        console.log(`Telegram bot webhook set to: ${appUrl}${secretPath}`);
+      } else {
+        // Fallback to polling ONLY in development
+        if (process.env.NODE_ENV !== 'production') {
+          await bot?.launch();
+          console.log('Telegram bot started via polling (Dev Mode)');
+        } else {
+          console.warn('Bot: RENDER_EXTERNAL_URL not found, webhook not set.');
+        }
+      }
+    } catch (err: any) {
+      if (err.response?.error_code === 409) {
+        console.warn('Telegram Bot Conflict: Another instance is running (409).');
+      } else {
+        console.error('Failed to setup Telegram bot:', err);
+      }
     }
-  }
+  };
+
+  setupBot();
 
   // Enable graceful stop
   process.once('SIGINT', () => bot?.stop('SIGINT'));
@@ -138,21 +148,24 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
 
       if (telegramUserId && bot) {
         try {
-          console.log(`Attempting to send document to Telegram user ${telegramUserId}...`);
+          console.log(`CRITICAL: Attempting to send document to TG user ID: ${telegramUserId}`);
           await bot.telegram.sendDocument(telegramUserId, {
             source: buffer,
             filename: filename
           });
-          console.log('Document sent to Telegram successfully');
+          console.log(`SUCCESS: Document sent to TG user ID: ${telegramUserId}`);
           return res.json({ 
             success: true, 
             sentToTelegram: true,
             message: 'Файл отправлен в ваш чат с ботом' 
           });
         } catch (tgError: any) {
-          console.error('Telegram send document error:', tgError.message || tgError);
+          console.error(`CRITICAL TG ERROR for user ${telegramUserId}:`, tgError.message || tgError);
           // If sending to Telegram fails, we fall back to giving the file directly
         }
+      } else {
+        if (!telegramUserId) console.log('TG WARNING: No telegramUserId provided in request.');
+        if (!bot) console.log('TG WARNING: Telegram bot not initialized.');
       }
 
       console.log('Falling back to direct download');
