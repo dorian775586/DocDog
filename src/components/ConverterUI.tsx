@@ -130,6 +130,17 @@ const ConverterUI: React.FC = () => {
 
   const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
   const [sentToTelegram, setSentToTelegram] = useState(false);
+  const [customFileName, setCustomFileName] = useState('');
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (processingState === 'completed') {
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 100);
+    }
+  }, [processingState]);
 
   const handleConvert = async () => {
     if (files.length === 0) return;
@@ -142,6 +153,12 @@ const ConverterUI: React.FC = () => {
     files.forEach(f => formData.append('files', f.file));
     formData.append('toFormat', toFormat);
     formData.append('mergeMode', mergeMode.toString());
+
+    const filename = customFileName.trim() 
+      ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
+      : (mergeMode ? 'merged.pdf' : 'converted.pdf');
+    
+    formData.append('filename', filename);
 
     // Get Telegram WebApp info
     const tg = (window as any).Telegram?.WebApp;
@@ -255,6 +272,7 @@ const ConverterUI: React.FC = () => {
     setProgress(0);
     setConvertedBlob(null);
     setSentToTelegram(false);
+    setCustomFileName('');
 
     // Hide Telegram MainButton if it was shown
     const tg = (window as any).Telegram?.WebApp;
@@ -435,6 +453,20 @@ const ConverterUI: React.FC = () => {
 
         {/* Global Options / Mode Switch */}
         <div className="flex flex-col gap-4 mb-8">
+          <div className="bg-white/5 rounded-3xl p-4 mb-2">
+            <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest leading-none mb-3">Имя выходного файла</p>
+            <div className="relative">
+              <input 
+                type="text" 
+                placeholder="Название (например: Документ_2024)"
+                value={customFileName}
+                onChange={(e) => setCustomFileName(e.target.value)}
+                className="w-full bg-black/20 border border-white/5 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-brand-primary/50 text-white placeholder:text-white/10 transition-all"
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 italic text-[10px] pointer-events-none">.pdf</div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-xl transition-colors ${mergeMode ? 'bg-brand-primary/10 text-brand-primary' : 'bg-white/5 text-white/20'}`}>
@@ -522,6 +554,12 @@ const ConverterUI: React.FC = () => {
 
         {/* Main Workspace Area */}
         <div className="flex-1 flex flex-col min-h-0">
+          <input
+            type="file" multiple ref={fileInputRef}
+            onChange={(e) => addFiles(e.target.files)}
+            className="hidden"
+            accept="image/*,application/pdf"
+          />
           <AnimatePresence mode="wait">
             {files.length === 0 ? (
               <motion.div
@@ -537,13 +575,6 @@ const ConverterUI: React.FC = () => {
                   ${isDragging ? 'bg-brand-primary/[0.05] border-brand-primary ring-4 ring-brand-primary/10' : 'bg-white/[0.02] hover:bg-white/[0.04]'}
                 `}
               >
-                <input
-                  type="file" multiple ref={fileInputRef}
-                  onChange={(e) => addFiles(e.target.files)}
-                  className="hidden"
-                  accept="image/*,application/pdf"
-                />
-                
                 {/* Decorative particles for depth */}
                 <div className="absolute inset-0 opacity-10 pointer-events-none">
                   <div className="absolute top-1/4 left-1/4 w-32 h-32 bg-blue-500 blur-[60px] rounded-full" />
@@ -738,6 +769,7 @@ const ConverterUI: React.FC = () => {
                         >
                           Новая сессия
                         </button>
+                        <div ref={bottomRef} className="h-4" />
                       </motion.div>
                     )}
                   </AnimatePresence>

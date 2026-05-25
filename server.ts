@@ -144,7 +144,7 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
 
       const pdfBytes = await pdfDoc.save();
       const buffer = Buffer.from(pdfBytes);
-      const filename = mergeMode ? 'merged.pdf' : 'converted.pdf';
+      const filename = req.body.filename || (mergeMode ? 'merged.pdf' : 'converted.pdf');
 
       if (telegramUserId && bot) {
         try {
