@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Document, Packer, Paragraph, ImageRun } from "docx";
+import { Document, Packer, Paragraph, ImageRun, TextRun } from "docx";
+import Tesseract from 'tesseract.js';
 import { 
   Upload, 
   FileText, 
@@ -57,6 +58,7 @@ const ConverterUI: React.FC = () => {
   const [metadataEnabled, setMetadataEnabled] = useState(false);
   const [metadata, setMetadata] = useState({ title: '', author: '', subject: '' });
   const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [ocrEnabled, setOcrEnabled] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -153,38 +155,59 @@ const ConverterUI: React.FC = () => {
 
       if (fileItem.file.type.startsWith('image/')) {
         try {
-          const arrayBuffer = await fileItem.file.arrayBuffer();
-          
-          // Get image dimensions to maintain aspect ratio
-          const img = new Image();
-          const url = URL.createObjectURL(fileItem.file);
-          await new Promise((resolve) => {
-            img.onload = resolve;
-            img.src = url;
-          });
-          
-          const width = img.width;
-          const height = img.height;
-          URL.revokeObjectURL(url);
+          if (ocrEnabled) {
+            const result = await Tesseract.recognize(
+              fileItem.file,
+              'rus+eng',
+              { logger: m => console.log('OCR Status:', m) }
+            );
+            
+            children.push(
+              new Paragraph({
+                pageBreakBefore: i > 0,
+                children: [
+                  new TextRun({
+                    text: result.data.text,
+                    font: "Arial",
+                    size: 24,
+                  }),
+                ],
+              })
+            );
+          } else {
+            const arrayBuffer = await fileItem.file.arrayBuffer();
+            
+            // Get image dimensions to maintain aspect ratio
+            const img = new Image();
+            const url = URL.createObjectURL(fileItem.file);
+            await new Promise((resolve) => {
+              img.onload = resolve;
+              img.src = url;
+            });
+            
+            const width = img.width;
+            const height = img.height;
+            URL.revokeObjectURL(url);
 
-          // Standard A4 width is ~450-500 points with margins
-          const maxWidth = 500;
-          const scale = Math.min(1, maxWidth / width);
+            // Standard A4 width is ~450-500 points with margins
+            const maxWidth = 500;
+            const scale = Math.min(1, maxWidth / width);
 
-          children.push(
-            new Paragraph({
-              pageBreakBefore: i > 0,
-              children: [
-                new ImageRun({
-                  data: new Uint8Array(arrayBuffer),
-                  transformation: {
-                    width: width * scale,
-                    height: height * scale,
-                  },
-                } as any),
-              ],
-            })
-          );
+            children.push(
+              new Paragraph({
+                pageBreakBefore: i > 0,
+                children: [
+                  new ImageRun({
+                    data: new Uint8Array(arrayBuffer),
+                    transformation: {
+                      width: width * scale,
+                      height: height * scale,
+                    },
+                  } as any),
+                ],
+              })
+            );
+          }
         } catch (err) {
           console.error('Error processing image for DOCX:', err);
         }
@@ -646,6 +669,38 @@ const ConverterUI: React.FC = () => {
               />
             </button>
           </div>
+
+          <AnimatePresence>
+            {toFormat === 'DOCX' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex items-center justify-between px-2"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl transition-colors ${ocrEnabled ? 'bg-brand-primary/10 text-brand-primary' : 'bg-white/5 text-white/20'}`}>
+                    <FileType size={16} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest leading-none mb-1">OCR (Распознавание текста)</p>
+                    <p className="text-xs font-bold">{ocrEnabled ? 'Редактируемый текст' : 'Картинки в документе'}</p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setOcrEnabled(!ocrEnabled)}
+                  className={`relative w-12 h-6 rounded-full transition-all duration-300 ${ocrEnabled ? 'bg-brand-primary' : 'bg-white/10'}`}
+                >
+                  <motion.div 
+                    animate={{ x: ocrEnabled ? 26 : 4 }}
+                    className="absolute top-1 left-0 h-4 w-4 bg-white rounded-full shadow-lg"
+                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                  />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {metadataEnabled && (
