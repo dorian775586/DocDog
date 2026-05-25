@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Document, Packer, Paragraph, ImageRun } from "docx";
 import { 
   Upload, 
   FileText, 
@@ -30,7 +31,7 @@ import CompressButton from './CompressButton';
 import PDFPreviewModal from './PDFPreviewModal';
 
 const FROM_FORMATS: FileFormat[] = ['AUTO', 'JPG', 'PNG', 'PDF', 'WEBP', 'DOCX', 'HEIC'];
-const TO_FORMATS: FileFormat[] = ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX'];
+const TO_FORMATS: FileFormat[] = ['PDF', 'DOCX', 'JPG', 'PNG', 'WEBP'];
 
 const FORMAT_META: Record<FileFormat, { label: string; icon: any; color: string; bg: string }> = {
   'AUTO': { label: 'AUTO', icon: Sparkles, color: '#007AFF', bg: 'rgba(0,122,255,0.1)' },
@@ -142,6 +143,68 @@ const ConverterUI: React.FC = () => {
     }
   }, [processingState]);
 
+  const convertToDocxOnClient = async (fileItems: FileItem[]) => {
+    const children: any[] = [];
+    
+    for (let i = 0; i < fileItems.length; i++) {
+      const fileItem = fileItems[i];
+      // Update progress
+      setProgress(Math.round(((i + 1) / fileItems.length) * 100));
+
+      if (fileItem.file.type.startsWith('image/')) {
+        try {
+          const arrayBuffer = await fileItem.file.arrayBuffer();
+          
+          // Get image dimensions to maintain aspect ratio
+          const img = new Image();
+          const url = URL.createObjectURL(fileItem.file);
+          await new Promise((resolve) => {
+            img.onload = resolve;
+            img.src = url;
+          });
+          
+          const width = img.width;
+          const height = img.height;
+          URL.revokeObjectURL(url);
+
+          // Standard A4 width is ~450-500 points with margins
+          const maxWidth = 500;
+          const scale = Math.min(1, maxWidth / width);
+
+          children.push(
+            new Paragraph({
+              children: [
+                new ImageRun({
+                  data: new Uint8Array(arrayBuffer),
+                  transformation: {
+                    width: width * scale,
+                    height: height * scale,
+                  },
+                } as any),
+              ],
+            })
+          );
+        } catch (err) {
+          console.error('Error processing image for DOCX:', err);
+        }
+      } else {
+        children.push(
+          new Paragraph({
+            text: `File: ${fileItem.name} (Non-image files are not supported in client-side DOCX conversion yet)`
+          })
+        );
+      }
+    }
+
+    const doc = new Document({
+      sections: [{
+        children: children,
+      }],
+    });
+
+    return await Packer.toBlob(doc);
+  };
+
   const handleConvert = async () => {
     if (files.length === 0) return;
     
@@ -150,66 +213,104 @@ const ConverterUI: React.FC = () => {
     setSentToTelegram(false);
 
     const formData = new FormData();
-    files.forEach(f => formData.append('files', f.file));
-    formData.append('toFormat', toFormat);
-    formData.append('mergeMode', mergeMode.toString());
-
+    const extension = toFormat.toLowerCase();
     const filename = customFileName.trim() 
-      ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
-      : (mergeMode ? 'merged.pdf' : 'converted.pdf');
-    
-    formData.append('filename', filename);
+      ? (customFileName.toLowerCase().endsWith(`.${extension}`) ? customFileName : `${customFileName}.${extension}`)
+      : (mergeMode ? `merged.${extension}` : `converted.${extension}`);
 
     // Get Telegram WebApp info
     const tg = (window as any).Telegram?.WebApp;
-    
-    // Attempt to get ID from multiple possible sources in Tg WebApp
     const telegramUserId = tg?.initDataUnsafe?.user?.id || tg?.initData?.user?.id;
-    
-    console.log('Client: Detected Telegram Environment:', !!tg);
-    console.log('Client: Telegram User ID:', telegramUserId);
-    
     if (telegramUserId) {
       formData.append('telegramUserId', telegramUserId.toString());
-    } else {
-      console.warn('Client: No Telegram User ID found. Falling back to browser mode.');
-    }
-
-    if (metadataEnabled && toFormat === 'PDF') {
-      formData.append('metadata', JSON.stringify(metadata));
     }
 
     try {
-      // Simulate some progress for UI feel, but starting the request
-      const interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(interval);
-            return 90;
-          }
-          return prev + Math.random() * 10;
+      let finalBlob: Blob;
+
+      if (toFormat === 'DOCX') {
+        // CLIENT-SIDE CONVERSION for DOCX
+        console.log('Client: Starting client-side DOCX conversion');
+        finalBlob = await convertToDocxOnClient(files);
+        formData.append('files', finalBlob, filename);
+        formData.append('toFormat', 'DOCX');
+        formData.append('filename', filename);
+      } else {
+        // SERVER-SIDE CONVERSION (PDF, images, etc.)
+        files.forEach(f => formData.append('files', f.file));
+        formData.append('toFormat', toFormat);
+        formData.append('mergeMode', mergeMode.toString());
+        formData.append('filename', filename);
+
+        if (metadataEnabled && toFormat === 'PDF') {
+          formData.append('metadata', JSON.stringify(metadata));
+        }
+
+        // Simulate progress for UI feel during server request
+        const interval = setInterval(() => {
+          setProgress((prev) => {
+            if (prev >= 90) {
+              clearInterval(interval);
+              return 90;
+            }
+            return prev + Math.random() * 5;
+          });
+        }, 150);
+
+        const response = await fetch('/api/convert', {
+          method: 'POST',
+          body: formData,
         });
-      }, 100);
 
-      const response = await fetch('/api/convert', {
-        method: 'POST',
-        body: formData,
-      });
+        clearInterval(interval);
 
-      clearInterval(interval);
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Ошибка сервера (${response.status}): ${text.substring(0, 50)}`);
+        }
 
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('Server error output:', text);
-        throw new Error(`Ошибка сервера (${response.status}): ${text.substring(0, 50)}`);
+        const contentType = response.headers.get('Content-Type');
+        if (contentType && contentType.includes('application/json')) {
+          const result = await response.json();
+          if (result.success) {
+            setSentToTelegram(true);
+            if (tg) {
+              if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+              if (tg.MainButton) {
+                tg.MainButton.setText('Файл отправлен в чат');
+                tg.MainButton.show();
+                tg.MainButton.onClick(() => tg.close());
+              }
+            }
+            setProgress(100);
+            setTimeout(() => setProcessingState('completed'), 600);
+            return;
+          } else {
+            throw new Error(result.error || 'Бот не смог отправить файл');
+          }
+        } else {
+          finalBlob = await response.blob();
+          setConvertedBlob(finalBlob);
+          setProgress(100);
+          setTimeout(() => setProcessingState('completed'), 600);
+          return;
+        }
       }
 
-      // We need to know if we are expecting JSON or a File
-      const contentType = response.headers.get('Content-Type');
-      
-      if (contentType && contentType.includes('application/json')) {
-        const result = await response.json();
-        if (result.success) {
+      // If we are here, we have a finalBlob from client-side (like DOCX) that needs to be delivered
+      // Send it to server just for delivery
+      if (telegramUserId) {
+        const deliveryResponse = await fetch('/api/convert', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!deliveryResponse.ok) {
+          throw new Error('Не удалось доставить готовый файл через сервер');
+        }
+
+        const deliveryResult = await deliveryResponse.json();
+        if (deliveryResult.success) {
           setSentToTelegram(true);
           if (tg) {
             if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
@@ -220,20 +321,16 @@ const ConverterUI: React.FC = () => {
             }
           }
         } else {
-          throw new Error(result.error || 'Бот не смог отправить файл');
+          throw new Error(deliveryResult.error || 'Ошибка при отправке в Telegram');
         }
       } else {
-        // Fallback for when server sends the file directly (no TG ID)
-        console.log('Client: Received file directly (Blob)');
-        const blob = await response.blob();
-        setConvertedBlob(blob);
+        // Fallback or browser mode: we have the blob, just set it
+        setConvertedBlob(finalBlob);
       }
 
       setProgress(100);
-      
-      setTimeout(() => {
-        setProcessingState('completed');
-      }, 600);
+      setTimeout(() => setProcessingState('completed'), 600);
+
     } catch (error: any) {
       console.error(error);
       setProcessingState('idle');
@@ -253,7 +350,10 @@ const ConverterUI: React.FC = () => {
     const url = URL.createObjectURL(convertedBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = mergeMode ? 'merged.pdf' : 'converted.pdf';
+    const extension = toFormat.toLowerCase();
+    a.download = customFileName.trim() 
+      ? (customFileName.toLowerCase().endsWith(`.${extension}`) ? customFileName : `${customFileName}.${extension}`)
+      : (mergeMode ? `merged.${extension}` : `converted.${extension}`);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

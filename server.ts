@@ -166,6 +166,27 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       return res.send(buffer);
+    } else if (toFormat === 'DOCX') {
+      // For DOCX, we assume the client already converted it and sent the single resulting file
+      const docxFile = files[0];
+      const filename = req.body.filename || docxFile.originalname || 'document.docx';
+      
+      if (telegramUserId && bot) {
+        try {
+          await bot.telegram.sendDocument(telegramUserId, {
+            source: docxFile.buffer,
+            filename: filename
+          });
+          return res.json({ success: true });
+        } catch (tgError: any) {
+          console.error(`DOCX TG ERROR for user ${telegramUserId}:`, tgError.message || tgError);
+          return res.status(500).json({ success: false, error: tgError.message || 'Ошибка отправки в Telegram' });
+        }
+      }
+      
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(docxFile.buffer);
     } else {
       // Basic fallback for other formats - if single file, just return "converted"
       // In a real app we'd do more, but for now let's handle the PDF use case which is the most common
