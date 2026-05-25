@@ -223,6 +223,8 @@ const ConverterUI: React.FC = () => {
 
     try {
       const isAllImages = files.every(f => f.file.type.startsWith('image/'));
+      const hasPdf = files.some(f => f.file.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+      
       let finalBlob: Blob;
 
       if (toFormat === 'DOCX' && isAllImages) {
@@ -230,6 +232,13 @@ const ConverterUI: React.FC = () => {
         console.log('Client: Starting client-side DOCX conversion');
         finalBlob = await convertToDocxOnClient(files);
       } else {
+        // Warning for PDF -> DOCX
+        if (toFormat === 'DOCX' && hasPdf) {
+          const msg = "PDF пока нельзя конвертировать в DOCX на телефоне. Отправляю на сервер для обработки.";
+          if (tg?.showAlert) tg.showAlert(msg);
+          else alert(msg);
+        }
+
         // SERVER-SIDE CONVERSION (PDF, complex cases, etc.)
         const formData = new FormData();
         files.forEach(f => formData.append('files', f.file));
@@ -775,7 +784,7 @@ const ConverterUI: React.FC = () => {
                         {/* Red X button at top-right */}
                         <button 
                           onClick={() => removeFile(fileItem.id)}
-                          className="absolute -top-1 -right-1 h-7 w-7 flex items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 hover:bg-red-600 hover:scale-110 active:scale-95 transition-all opacity-0 group-hover:opacity-100 z-10"
+                          className="absolute -top-1 -right-1 h-7 w-7 flex items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 hover:bg-red-600 hover:scale-110 active:scale-95 transition-all z-10"
                           title="Удалить файл"
                         >
                           <X size={14} strokeWidth={3} />
