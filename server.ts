@@ -18,9 +18,10 @@ const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, su
 
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const disableBot = process.env.DISABLE_TELEGRAM_BOT === 'true';
 let bot: Telegraf | null = null;
 
-if (botToken) {
+if (botToken && !disableBot) {
   bot = new Telegraf(botToken);
   
   bot.start((ctx) => {
@@ -31,13 +32,38 @@ if (botToken) {
     ctx.reply('Получил файл. Пока я в режиме настройки, скоро научусь его обрабатывать!');
   });
 
-  bot.launch().then(() => {
-    console.log('Telegram bot started');
-  }).catch(err => {
-    console.error('Error starting Telegram bot:', err);
+  // Handle errors
+  bot.catch((err: any, ctx) => {
+    console.error(`Tg Error for ${ctx.updateType}`, err);
   });
+
+  const startBot = async () => {
+    try {
+      // Small delay to let previous instances disconnect if server restarted quickly
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      await bot?.launch();
+      console.log('Telegram bot started successfully');
+    } catch (err: any) {
+      if (err.response?.error_code === 409) {
+        console.warn('Telegram Bot Conflict: Another instance is running (409). Check your production server or other dev instances.');
+      } else {
+        console.error('Failed to start Telegram bot:', err);
+      }
+    }
+  };
+
+  startBot();
+
+  // Enable graceful stop
+  process.once('SIGINT', () => bot?.stop('SIGINT'));
+  process.once('SIGTERM', () => bot?.stop('SIGTERM'));
 } else {
-  console.log('TELEGRAM_BOT_TOKEN not found, bot disabled');
+  if (disableBot) {
+    console.log('Telegram bot disabled via DISABLE_TELEGRAM_BOT env var');
+  } else {
+    console.log('TELEGRAM_BOT_TOKEN not found, bot disabled');
+  }
 }
 
 // Multer setup for file uploads (in-memory)
