@@ -175,31 +175,22 @@ const ConverterUI: React.FC = () => {
 
       clearInterval(interval);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Conversion failed');
-      }
+      if (!response.ok) throw new Error('Ошибка сервера');
 
-      const contentType = response.headers.get('Content-Type');
-      if (contentType && contentType.includes('application/json')) {
-        const result = await response.json();
-        if (result.success && result.sentToTelegram) {
-          setSentToTelegram(true);
-          if (tg) {
-            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-            if (tg.MainButton) {
-              tg.MainButton.setText('Файл отправлен в чат');
-              tg.MainButton.show();
-              tg.MainButton.onClick(() => tg.close());
-            }
+      const result = await response.json(); // Ожидаем только JSON!
+
+      if (result.success) {
+        setSentToTelegram(true);
+        if (tg) {
+          if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+          if (tg.MainButton) {
+            tg.MainButton.setText('Файл отправлен в чат');
+            tg.MainButton.show();
+            tg.MainButton.onClick(() => tg.close());
           }
-        } else {
-          throw new Error(result.error || 'Unknown error during bot delivery');
         }
       } else {
-        // Direct browser download
-        const blob = await response.blob();
-        setConvertedBlob(blob);
+        throw new Error(result.error || 'Unknown error');
       }
 
       setProgress(100);
@@ -216,7 +207,7 @@ const ConverterUI: React.FC = () => {
 
   const handleDownload = () => {
     const tg = (window as any).Telegram?.WebApp;
-    if (sentToTelegram && tg) {
+    if (tg) {
       tg.close();
       return;
     }

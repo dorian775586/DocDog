@@ -154,17 +154,10 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
             filename: filename
           });
           console.log(`SUCCESS: Document sent to TG user ID: ${telegramUserId}`);
-          return res.json({ 
-            success: true, 
-            sentToTelegram: true,
-            message: 'Файл отправлен в ваш чат с ботом' 
-          });
+          return res.json({ success: true }); 
         } catch (tgError: any) {
           console.error(`CRITICAL TG ERROR for user ${telegramUserId}:`, tgError.message || tgError);
-          return res.status(500).json({ 
-            success: false, 
-            error: `Ошибка отправки в Telegram: ${tgError.message || 'Unknown error'}` 
-          });
+          return res.status(500).json({ success: false, error: tgError.message || 'Ошибка отправки в Telegram' });
         }
       }
 
