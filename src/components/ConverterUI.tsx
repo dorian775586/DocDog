@@ -143,13 +143,19 @@ const ConverterUI: React.FC = () => {
     formData.append('toFormat', toFormat);
     formData.append('mergeMode', mergeMode.toString());
 
-    // Get Telegram User ID if available
+    // Get Telegram WebApp info
     const tg = (window as any).Telegram?.WebApp;
-    const telegramUserId = tg?.initDataUnsafe?.user?.id;
-    console.log('Client: Telegram User ID found:', telegramUserId);
+    
+    // Attempt to get ID from multiple possible sources in Tg WebApp
+    const telegramUserId = tg?.initDataUnsafe?.user?.id || tg?.initData?.user?.id;
+    
+    console.log('Client: Detected Telegram Environment:', !!tg);
+    console.log('Client: Telegram User ID:', telegramUserId);
     
     if (telegramUserId) {
       formData.append('telegramUserId', telegramUserId.toString());
+    } else {
+      console.warn('Client: No Telegram User ID found. Falling back to browser mode.');
     }
 
     if (metadataEnabled && toFormat === 'PDF') {
@@ -175,22 +181,35 @@ const ConverterUI: React.FC = () => {
 
       clearInterval(interval);
 
-      if (!response.ok) throw new Error('Ошибка сервера');
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('Server error output:', text);
+        throw new Error(`Ошибка сервера (${response.status}): ${text.substring(0, 50)}`);
+      }
 
-      const result = await response.json(); // Ожидаем только JSON!
-
-      if (result.success) {
-        setSentToTelegram(true);
-        if (tg) {
-          if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-          if (tg.MainButton) {
-            tg.MainButton.setText('Файл отправлен в чат');
-            tg.MainButton.show();
-            tg.MainButton.onClick(() => tg.close());
+      // We need to know if we are expecting JSON or a File
+      const contentType = response.headers.get('Content-Type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        const result = await response.json();
+        if (result.success) {
+          setSentToTelegram(true);
+          if (tg) {
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            if (tg.MainButton) {
+              tg.MainButton.setText('Файл отправлен в чат');
+              tg.MainButton.show();
+              tg.MainButton.onClick(() => tg.close());
+            }
           }
+        } else {
+          throw new Error(result.error || 'Бот не смог отправить файл');
         }
       } else {
-        throw new Error(result.error || 'Unknown error');
+        // Fallback for when server sends the file directly (no TG ID)
+        console.log('Client: Received file directly (Blob)');
+        const blob = await response.blob();
+        setConvertedBlob(blob);
       }
 
       setProgress(100);

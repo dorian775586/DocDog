@@ -283,7 +283,10 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`BOOT: Server started on port ${PORT}`);
+    console.log(`BOOT: Env: ${process.env.NODE_ENV}`);
+    console.log(`BOOT: BOT Token: ${process.env.TELEGRAM_BOT_TOKEN ? 'Present' : 'MISSING'}`);
+    console.log(`BOOT: App URL: ${process.env.RENDER_EXTERNAL_URL || 'NONE (polling mode)'}`);
   });
 }
 
