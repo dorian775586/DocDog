@@ -5,9 +5,40 @@ import sharp from 'sharp';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { PDFDocument } from 'pdf-lib';
+import { Telegraf } from 'telegraf';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+
+// Supabase Setup
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+// Telegram Bot Setup
+const botToken = process.env.TELEGRAM_BOT_TOKEN;
+let bot: Telegraf | null = null;
+
+if (botToken) {
+  bot = new Telegraf(botToken);
+  
+  bot.start((ctx) => {
+    ctx.reply('Привет! Я бот для работы с PDF. Пришли мне файл, и я помогу его обработать.');
+  });
+
+  bot.on('document', async (ctx) => {
+    ctx.reply('Получил файл. Пока я в режиме настройки, скоро научусь его обрабатывать!');
+  });
+
+  bot.launch().then(() => {
+    console.log('Telegram bot started');
+  }).catch(err => {
+    console.error('Error starting Telegram bot:', err);
+  });
+} else {
+  console.log('TELEGRAM_BOT_TOKEN not found, bot disabled');
+}
 
 // Multer setup for file uploads (in-memory)
 const storage = multer.memoryStorage();
