@@ -18,6 +18,7 @@ import {
   Lock,
   Sparkles,
   Eye,
+  Send,
   Image as ImageIcon,
   FileBox,
   FileType,
@@ -128,17 +129,26 @@ const ConverterUI: React.FC = () => {
   };
 
   const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
+  const [sentToTelegram, setSentToTelegram] = useState(false);
 
   const handleConvert = async () => {
     if (files.length === 0) return;
     
     setProcessingState('processing');
     setProgress(0);
+    setSentToTelegram(false);
 
     const formData = new FormData();
     files.forEach(f => formData.append('files', f.file));
     formData.append('toFormat', toFormat);
     formData.append('mergeMode', mergeMode.toString());
+
+    // Get Telegram User ID if available
+    const tg = (window as any).Telegram?.WebApp;
+    const telegramUserId = tg?.initDataUnsafe?.user?.id;
+    if (telegramUserId) {
+      formData.append('telegramUserId', telegramUserId.toString());
+    }
 
     if (metadataEnabled && toFormat === 'PDF') {
       formData.append('metadata', JSON.stringify(metadata));
@@ -167,8 +177,18 @@ const ConverterUI: React.FC = () => {
         throw new Error('Conversion failed');
       }
 
-      const blob = await response.blob();
-      setConvertedBlob(blob);
+      const contentType = response.headers.get('Content-Type');
+      if (contentType && contentType.includes('application/json')) {
+        const result = await response.json();
+        if (result.sentToTelegram) {
+          setSentToTelegram(true);
+          if (tg?.showAlert) tg.showAlert('Файл успешно отправлен в ваш чат с ботом!');
+        }
+      } else {
+        const blob = await response.blob();
+        setConvertedBlob(blob);
+      }
+
       setProgress(100);
       
       setTimeout(() => {
@@ -649,10 +669,24 @@ const ConverterUI: React.FC = () => {
 
                         <button 
                           onClick={handleDownload}
-                          className="w-full py-5 rounded-3xl bg-white text-black font-extrabold text-lg shadow-2xl flex items-center justify-center gap-3 hover:bg-white/90 active:scale-95 transition-all"
+                          disabled={sentToTelegram && !convertedBlob}
+                          className={`w-full py-5 rounded-3xl font-extrabold text-lg shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-all ${
+                            sentToTelegram 
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
+                            : 'bg-white text-black hover:bg-white/90'
+                          }`}
                         >
-                          <CheckCircle2 size={24} className="text-green-500" />
-                          Скачать {mergeMode ? 'Общий PDF' : (files.length > 1 ? 'Файлы' : 'Файл')}
+                          {sentToTelegram ? (
+                            <>
+                              <Send size={24} />
+                              Отправлено в чат
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={24} className="text-green-500" />
+                              Скачать {mergeMode ? 'Общий PDF' : (files.length > 1 ? 'Файлы' : 'Файл')}
+                            </>
+                          )}
                         </button>
                         <button 
                           onClick={reset}

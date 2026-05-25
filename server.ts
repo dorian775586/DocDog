@@ -57,13 +57,13 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
 
     const toFormat = (req.body.toFormat || 'PDF').toUpperCase();
     const mergeMode = req.body.mergeMode === 'true';
+    const telegramUserId = req.body.telegramUserId;
     
     if (toFormat === 'PDF') {
       const pdfDoc = await PDFDocument.create();
 
       for (const file of files) {
         if (file.mimetype.startsWith('image/')) {
-          // Convert image to PDF page
           const imageBuffer = file.buffer;
           let image;
           
@@ -72,7 +72,6 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
           } else if (file.mimetype === 'image/png') {
             image = await pdfDoc.embedPng(imageBuffer);
           } else {
-            // Convert other formats to PNG first using sharp
             const pngBuffer = await sharp(imageBuffer).png().toBuffer();
             image = await pdfDoc.embedPng(pngBuffer);
           }
@@ -85,7 +84,6 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
             height: image.height,
           });
         } else if (file.mimetype === 'application/pdf') {
-          // Merge existing PDF
           const pdf = await PDFDocument.load(file.buffer);
           const copiedPages = await pdfDoc.copyPages(pdf, pdf.getPageIndices());
           copiedPages.forEach((page) => pdfDoc.addPage(page));
@@ -94,9 +92,27 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
 
       const pdfBytes = await pdfDoc.save();
       const buffer = Buffer.from(pdfBytes);
+      const filename = mergeMode ? 'merged.pdf' : 'converted.pdf';
+
+      if (telegramUserId && bot) {
+        try {
+          await bot.telegram.sendDocument(telegramUserId, {
+            source: buffer,
+            filename: filename
+          });
+          return res.json({ 
+            success: true, 
+            sentToTelegram: true,
+            message: 'Файл отправлен в ваш чат с ботом' 
+          });
+        } catch (tgError) {
+          console.error('Telegram send error:', tgError);
+          // Fallback to direct download if Telegram fails
+        }
+      }
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="converted.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(buffer);
     } else {
       // Basic fallback for other formats - if single file, just return "converted"
