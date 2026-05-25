@@ -173,6 +173,7 @@ const ConverterUI: React.FC = () => {
 
           children.push(
             new Paragraph({
+              pageBreakBefore: i > 0,
               children: [
                 new ImageRun({
                   data: new Uint8Array(arrayBuffer),
@@ -190,6 +191,7 @@ const ConverterUI: React.FC = () => {
       } else {
         children.push(
           new Paragraph({
+            pageBreakBefore: i > 0,
             text: `File: ${fileItem.name} (Non-image files are not supported in client-side DOCX conversion yet)`
           })
         );
@@ -198,6 +200,20 @@ const ConverterUI: React.FC = () => {
 
     const doc = new Document({
       sections: [{
+        properties: {
+          page: {
+            size: {
+              width: 11906, // A4
+              height: 16838,
+            },
+            margin: {
+              top: 720,
+              right: 720,
+              bottom: 720,
+              left: 720,
+            },
+          },
+        },
         children: children,
       }],
     });
