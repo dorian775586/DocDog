@@ -208,6 +208,20 @@ const ConverterUI: React.FC = () => {
   const handleConvert = async () => {
     if (files.length === 0) return;
     
+    // Get Telegram WebApp info
+    const tg = (window as any).Telegram?.WebApp;
+    const telegramUserId = tg?.initDataUnsafe?.user?.id || tg?.initData?.user?.id;
+
+    const isAllImages = files.every(f => f.file.type.startsWith('image/'));
+    
+    // Block PDF to DOCX as requested - strictly only allow JPG/PNG for phone DOCX conversion
+    if (toFormat === 'DOCX' && !isAllImages) {
+      const msg = "PDF нельзя конвертировать в DOCX на телефоне. Используйте только JPG/PNG.";
+      if (tg?.showAlert) tg.showAlert(msg);
+      else alert(msg);
+      return; 
+    }
+
     setProcessingState('processing');
     setProgress(0);
     setSentToTelegram(false);
@@ -217,14 +231,7 @@ const ConverterUI: React.FC = () => {
       ? (customFileName.toLowerCase().endsWith(`.${extension}`) ? customFileName : `${customFileName}.${extension}`)
       : (mergeMode ? `merged.${extension}` : `converted.${extension}`);
 
-    // Get Telegram WebApp info
-    const tg = (window as any).Telegram?.WebApp;
-    const telegramUserId = tg?.initDataUnsafe?.user?.id || tg?.initData?.user?.id;
-
     try {
-      const isAllImages = files.every(f => f.file.type.startsWith('image/'));
-      const hasPdf = files.some(f => f.file.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-      
       let finalBlob: Blob;
 
       if (toFormat === 'DOCX' && isAllImages) {
@@ -232,13 +239,6 @@ const ConverterUI: React.FC = () => {
         console.log('Client: Starting client-side DOCX conversion');
         finalBlob = await convertToDocxOnClient(files);
       } else {
-        // Warning for PDF -> DOCX
-        if (toFormat === 'DOCX' && hasPdf) {
-          const msg = "PDF пока нельзя конвертировать в DOCX на телефоне. Отправляю на сервер для обработки.";
-          if (tg?.showAlert) tg.showAlert(msg);
-          else alert(msg);
-        }
-
         // SERVER-SIDE CONVERSION (PDF, complex cases, etc.)
         const formData = new FormData();
         files.forEach(f => formData.append('files', f.file));
@@ -783,11 +783,11 @@ const ConverterUI: React.FC = () => {
                         
                         {/* Red X button at top-right */}
                         <button 
-                          onClick={() => removeFile(fileItem.id)}
-                          className="absolute -top-1 -right-1 h-7 w-7 flex items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 hover:bg-red-600 hover:scale-110 active:scale-95 transition-all z-10"
+                          onClick={(e) => { e.stopPropagation(); removeFile(fileItem.id); }}
+                          className="absolute -top-2 -right-2 h-8 w-8 flex items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-500/40 hover:bg-red-600 hover:scale-110 active:scale-90 transition-all z-20 border-2 border-brand-obsidian"
                           title="Удалить файл"
                         >
-                          <X size={14} strokeWidth={3} />
+                          <X size={16} strokeWidth={3} />
                         </button>
                       </motion.div>
                     ))}
