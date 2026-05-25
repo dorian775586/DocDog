@@ -9,7 +9,7 @@ import { Telegraf } from 'telegraf';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 // Supabase Setup
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -48,6 +48,67 @@ const upload = multer({
 });
 
 // API Routes
+app.post('/api/convert', upload.array('files'), async (req: Request, res: Response) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const toFormat = (req.body.toFormat || 'PDF').toUpperCase();
+    const mergeMode = req.body.mergeMode === 'true';
+    
+    if (toFormat === 'PDF') {
+      const pdfDoc = await PDFDocument.create();
+
+      for (const file of files) {
+        if (file.mimetype.startsWith('image/')) {
+          // Convert image to PDF page
+          const imageBuffer = file.buffer;
+          let image;
+          
+          if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') {
+            image = await pdfDoc.embedJpg(imageBuffer);
+          } else if (file.mimetype === 'image/png') {
+            image = await pdfDoc.embedPng(imageBuffer);
+          } else {
+            // Convert other formats to PNG first using sharp
+            const pngBuffer = await sharp(imageBuffer).png().toBuffer();
+            image = await pdfDoc.embedPng(pngBuffer);
+          }
+
+          const page = pdfDoc.addPage([image.width, image.height]);
+          page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height,
+          });
+        } else if (file.mimetype === 'application/pdf') {
+          // Merge existing PDF
+          const pdf = await PDFDocument.load(file.buffer);
+          const copiedPages = await pdfDoc.copyPages(pdf, pdf.getPageIndices());
+          copiedPages.forEach((page) => pdfDoc.addPage(page));
+        }
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const buffer = Buffer.from(pdfBytes);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="converted.pdf"`);
+      res.send(buffer);
+    } else {
+      // Basic fallback for other formats - if single file, just return "converted"
+      // In a real app we'd do more, but for now let's handle the PDF use case which is the most common
+      res.status(400).json({ error: `Conversion to ${toFormat} is not fully implemented yet` });
+    }
+  } catch (error) {
+    console.error('Conversion error:', error);
+    res.status(500).json({ error: 'Internal server error during conversion' });
+  }
+});
+
 app.post('/api/compress', upload.single('file'), async (req: Request, res: Response) => {
   try {
     const file = req.file as Express.Multer.File;

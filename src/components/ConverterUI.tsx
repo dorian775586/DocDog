@@ -127,22 +127,71 @@ const ConverterUI: React.FC = () => {
     });
   };
 
-  const handleConvert = () => {
+  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
+
+  const handleConvert = async () => {
     if (files.length === 0) return;
     
     setProcessingState('processing');
     setProgress(0);
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => setProcessingState('completed'), 600);
-          return 100;
-        }
-        return prev + Math.random() * 6;
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f.file));
+    formData.append('toFormat', toFormat);
+    formData.append('mergeMode', mergeMode.toString());
+
+    if (metadataEnabled && toFormat === 'PDF') {
+      formData.append('metadata', JSON.stringify(metadata));
+    }
+
+    try {
+      // Simulate some progress for UI feel, but starting the request
+      const interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(interval);
+            return 90;
+          }
+          return prev + Math.random() * 10;
+        });
+      }, 100);
+
+      const response = await fetch('/api/convert', {
+        method: 'POST',
+        body: formData,
       });
-    }, 80);
+
+      clearInterval(interval);
+
+      if (!response.ok) {
+        throw new Error('Conversion failed');
+      }
+
+      const blob = await response.blob();
+      setConvertedBlob(blob);
+      setProgress(100);
+      
+      setTimeout(() => {
+        setProcessingState('completed');
+      }, 600);
+    } catch (error) {
+      console.error(error);
+      setProcessingState('idle');
+      // Show error alert? Or just reset
+    }
+  };
+
+  const handleDownload = () => {
+    if (!convertedBlob) return;
+    
+    const url = URL.createObjectURL(convertedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = mergeMode ? 'merged.pdf' : 'converted.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const swapFormats = () => {
@@ -155,39 +204,7 @@ const ConverterUI: React.FC = () => {
     setFiles([]);
     setProcessingState('idle');
     setProgress(0);
-  };
-
-  const handleMergeDownload = async () => {
-    const pdfFiles = files.filter(f => f.file.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-    if (pdfFiles.length === 0) return;
-
-    const formData = new FormData();
-    pdfFiles.forEach(f => formData.append('files', f.file));
-    
-    if (metadataEnabled) {
-      formData.append('metadata', JSON.stringify(metadata));
-    }
-
-    try {
-      const response = await fetch('/api/merge-pdf', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Merge failed');
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'merged.pdf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error(error);
-    }
+    setConvertedBlob(null);
   };
 
   const formatSize = (bytes: number) => {
@@ -631,11 +648,11 @@ const ConverterUI: React.FC = () => {
                         </div>
 
                         <button 
-                          onClick={mergeMode ? handleMergeDownload : undefined}
+                          onClick={handleDownload}
                           className="w-full py-5 rounded-3xl bg-white text-black font-extrabold text-lg shadow-2xl flex items-center justify-center gap-3 hover:bg-white/90 active:scale-95 transition-all"
                         >
                           <CheckCircle2 size={24} className="text-green-500" />
-                          Скачать {mergeMode ? 'Общий PDF' : (files.length > 1 ? 'Все архивом' : 'Файл')}
+                          Скачать {mergeMode ? 'Общий PDF' : (files.length > 1 ? 'Файлы' : 'Файл')}
                         </button>
                         <button 
                           onClick={reset}
