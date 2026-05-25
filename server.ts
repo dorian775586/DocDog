@@ -161,14 +161,15 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
           });
         } catch (tgError: any) {
           console.error(`CRITICAL TG ERROR for user ${telegramUserId}:`, tgError.message || tgError);
-          // If sending to Telegram fails, we fall back to giving the file directly
+          return res.status(500).json({ 
+            success: false, 
+            error: `Ошибка отправки в Telegram: ${tgError.message || 'Unknown error'}` 
+          });
         }
-      } else {
-        if (!telegramUserId) console.log('TG WARNING: No telegramUserId provided in request.');
-        if (!bot) console.log('TG WARNING: Telegram bot not initialized.');
       }
 
-      console.log('Falling back to direct download');
+      // If no telegramUserId, we assume it's a web browser request
+      console.log('No telegramUserId, sending file directly for browser download');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       return res.send(buffer);

@@ -176,25 +176,28 @@ const ConverterUI: React.FC = () => {
       clearInterval(interval);
 
       if (!response.ok) {
-        throw new Error('Conversion failed');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Conversion failed');
       }
 
       const contentType = response.headers.get('Content-Type');
       if (contentType && contentType.includes('application/json')) {
         const result = await response.json();
-        if (result.sentToTelegram) {
+        if (result.success && result.sentToTelegram) {
           setSentToTelegram(true);
-          // If in Telegram, we can show a main button or close the app
           if (tg) {
             if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             if (tg.MainButton) {
-              tg.MainButton.setText('Вернуться в чат');
+              tg.MainButton.setText('Файл отправлен в чат');
               tg.MainButton.show();
               tg.MainButton.onClick(() => tg.close());
             }
           }
+        } else {
+          throw new Error(result.error || 'Unknown error during bot delivery');
         }
       } else {
+        // Direct browser download
         const blob = await response.blob();
         setConvertedBlob(blob);
       }
@@ -204,19 +207,17 @@ const ConverterUI: React.FC = () => {
       setTimeout(() => {
         setProcessingState('completed');
       }, 600);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setProcessingState('idle');
-      // Show error alert? Or just reset
+      if (tg?.showAlert) tg.showAlert(`Ошибка: ${error.message || 'Something went wrong'}`);
     }
   };
 
   const handleDownload = () => {
-    if (sentToTelegram) {
-      const tg = (window as any).Telegram?.WebApp;
-      if (tg) {
-        tg.close();
-      }
+    const tg = (window as any).Telegram?.WebApp;
+    if (sentToTelegram && tg) {
+      tg.close();
       return;
     }
 
