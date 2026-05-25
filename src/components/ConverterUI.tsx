@@ -753,7 +753,7 @@ const ConverterUI: React.FC = () => {
                   </button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+                <div className="flex-1 overflow-y-auto custom-scrollbar pt-2 px-2 pb-10 space-y-4">
                   <AnimatePresence initial={false}>
                     {files.map((fileItem, idx) => (
                       <motion.div
@@ -772,7 +772,7 @@ const ConverterUI: React.FC = () => {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[15px] font-bold truncate group-hover:text-brand-primary transition-colors pr-6">{fileItem.name}</p>
+                          <p className="text-[15px] font-bold truncate pr-8 group-hover:text-brand-primary transition-colors">{fileItem.name}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] font-mono font-bold text-white/20 uppercase bg-white/5 px-1.5 py-0.5 rounded-md">{formatSize(fileItem.size)}</span>
                             <div className="h-1 w-1 rounded-full bg-white/10" />
@@ -797,10 +797,10 @@ const ConverterUI: React.FC = () => {
                           )}
                         </div>
                         
-                        {/* Red X button at top-right */}
+                        {/* Red X button at top-right - always visible for clarity */}
                         <button 
                           onClick={(e) => { e.stopPropagation(); removeFile(fileItem.id); }}
-                          className="absolute -top-2 -right-2 h-8 w-8 flex items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-500/40 hover:bg-red-600 hover:scale-110 active:scale-90 transition-all z-20 border-2 border-brand-obsidian"
+                          className="absolute -top-1.5 -right-1.5 h-8 w-8 flex items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-500/40 hover:bg-red-600 hover:scale-110 active:scale-95 transition-all z-20 border-2 border-brand-obsidian"
                           title="Удалить файл"
                         >
                           <X size={16} strokeWidth={3} />
