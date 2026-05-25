@@ -136,12 +136,12 @@ const ConverterUI: React.FC = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (processingState === 'completed') {
+    if (processingState === 'completed' || sentToTelegram) {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }, 100);
+      }, 150);
     }
-  }, [processingState]);
+  }, [processingState, sentToTelegram]);
 
   const convertToDocxOnClient = async (fileItems: FileItem[]) => {
     const children: any[] = [];
@@ -212,7 +212,6 @@ const ConverterUI: React.FC = () => {
     setProgress(0);
     setSentToTelegram(false);
 
-    const formData = new FormData();
     const extension = toFormat.toLowerCase();
     const filename = customFileName.trim() 
       ? (customFileName.toLowerCase().endsWith(`.${extension}`) ? customFileName : `${customFileName}.${extension}`)
@@ -221,26 +220,26 @@ const ConverterUI: React.FC = () => {
     // Get Telegram WebApp info
     const tg = (window as any).Telegram?.WebApp;
     const telegramUserId = tg?.initDataUnsafe?.user?.id || tg?.initData?.user?.id;
-    if (telegramUserId) {
-      formData.append('telegramUserId', telegramUserId.toString());
-    }
 
     try {
+      const isAllImages = files.every(f => f.file.type.startsWith('image/'));
       let finalBlob: Blob;
 
-      if (toFormat === 'DOCX') {
-        // CLIENT-SIDE CONVERSION for DOCX
+      if (toFormat === 'DOCX' && isAllImages) {
+        // CLIENT-SIDE CONVERSION for DOCX (Images only)
         console.log('Client: Starting client-side DOCX conversion');
         finalBlob = await convertToDocxOnClient(files);
-        formData.append('files', finalBlob, filename);
-        formData.append('toFormat', 'DOCX');
-        formData.append('filename', filename);
       } else {
-        // SERVER-SIDE CONVERSION (PDF, images, etc.)
+        // SERVER-SIDE CONVERSION (PDF, complex cases, etc.)
+        const formData = new FormData();
         files.forEach(f => formData.append('files', f.file));
         formData.append('toFormat', toFormat);
         formData.append('mergeMode', mergeMode.toString());
         formData.append('filename', filename);
+
+        if (telegramUserId) {
+          formData.append('telegramUserId', telegramUserId.toString());
+        }
 
         if (metadataEnabled && toFormat === 'PDF') {
           formData.append('metadata', JSON.stringify(metadata));
@@ -297,12 +296,17 @@ const ConverterUI: React.FC = () => {
         }
       }
 
-      // If we are here, we have a finalBlob from client-side (like DOCX) that needs to be delivered
-      // Send it to server just for delivery
+      // If we are here, we have a finalBlob from client-side that needs to be delivered
       if (telegramUserId) {
+        const deliveryFormData = new FormData();
+        deliveryFormData.append('files', finalBlob, filename);
+        deliveryFormData.append('toFormat', toFormat);
+        deliveryFormData.append('filename', filename);
+        deliveryFormData.append('telegramUserId', telegramUserId.toString());
+
         const deliveryResponse = await fetch('/api/convert', {
           method: 'POST',
-          body: formData,
+          body: deliveryFormData,
         });
 
         if (!deliveryResponse.ok) {
@@ -563,7 +567,9 @@ const ConverterUI: React.FC = () => {
                 onChange={(e) => setCustomFileName(e.target.value)}
                 className="w-full bg-black/20 border border-white/5 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-brand-primary/50 text-white placeholder:text-white/10 transition-all"
               />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 italic text-[10px] pointer-events-none">.pdf</div>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 italic text-[10px] pointer-events-none">
+                .{toFormat.toLowerCase()}
+              </div>
             </div>
           </div>
 
@@ -657,8 +663,8 @@ const ConverterUI: React.FC = () => {
           <input
             type="file" multiple ref={fileInputRef}
             onChange={(e) => addFiles(e.target.files)}
-            className="hidden"
-            accept="image/*,application/pdf"
+            className="absolute opacity-0 pointer-events-none w-0 h-0"
+            accept="image/*,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           />
           <AnimatePresence mode="wait">
             {files.length === 0 ? (
@@ -731,7 +737,7 @@ const ConverterUI: React.FC = () => {
                         animate={{ opacity: 1, x: 0, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ delay: idx * 0.04 }}
-                        className="p-4 rounded-3xl bg-white/[0.03] border border-white/[0.06] flex items-center gap-4 group hover:bg-white/[0.05] transition-all"
+                        className="p-4 rounded-3xl bg-white/[0.03] border border-white/[0.06] flex items-center gap-4 group hover:bg-white/[0.05] transition-all relative"
                       >
                         <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/[0.05] flex items-center justify-center overflow-hidden border border-white/[0.08]">
                           {fileItem.previewUrl ? (
@@ -741,7 +747,7 @@ const ConverterUI: React.FC = () => {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[15px] font-bold truncate group-hover:text-brand-primary transition-colors">{fileItem.name}</p>
+                          <p className="text-[15px] font-bold truncate group-hover:text-brand-primary transition-colors pr-6">{fileItem.name}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] font-mono font-bold text-white/20 uppercase bg-white/5 px-1.5 py-0.5 rounded-md">{formatSize(fileItem.size)}</span>
                             <div className="h-1 w-1 rounded-full bg-white/10" />
@@ -754,20 +760,25 @@ const ConverterUI: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                        {(fileItem.file.type === 'application/pdf' || fileItem.name.toLowerCase().endsWith('.pdf')) && (
-                          <button 
-                            onClick={() => setPreviewFile(fileItem.file)}
-                            className="h-10 w-10 flex items-center justify-center rounded-full text-white/20 hover:bg-white/10 hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                            title="Просмотр PDF"
-                          >
-                            <Eye size={20} />
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {(fileItem.file.type === 'application/pdf' || fileItem.name.toLowerCase().endsWith('.pdf')) && (
+                            <button 
+                              onClick={() => setPreviewFile(fileItem.file)}
+                              className="h-10 w-10 flex items-center justify-center rounded-full text-white/20 hover:bg-white/10 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                              title="Просмотр PDF"
+                            >
+                              <Eye size={20} />
+                            </button>
+                          )}
+                        </div>
+                        
+                        {/* Red X button at top-right */}
                         <button 
                           onClick={() => removeFile(fileItem.id)}
-                          className="h-10 w-10 flex items-center justify-center rounded-full text-white/20 hover:bg-red-500/10 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"
+                          className="absolute -top-1 -right-1 h-7 w-7 flex items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 hover:bg-red-600 hover:scale-110 active:scale-95 transition-all opacity-0 group-hover:opacity-100 z-10"
+                          title="Удалить файл"
                         >
-                          <X size={20} />
+                          <X size={14} strokeWidth={3} />
                         </button>
                       </motion.div>
                     ))}
