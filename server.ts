@@ -19,17 +19,18 @@ const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, su
 // Telegram Bot Setup
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const disableBot = process.env.DISABLE_TELEGRAM_BOT === 'true';
+const appUrl = process.env.RENDER_EXTERNAL_URL; // Render provides this
 let bot: Telegraf | null = null;
 
 if (botToken && !disableBot) {
   bot = new Telegraf(botToken);
   
   bot.start((ctx) => {
-    ctx.reply('Привет! Я бот для работы с PDF. Пришли мне файл, и я помогу его обработать.');
+    ctx.reply('Привет! Я бот DocDog. Я помогу тебе превратить твои изображения в PDF или объединить несколько файлов в один.\n\nПросто открой Mini App кнопкой ниже или пришли мне файлы прямо сюда!');
   });
 
   bot.on('document', async (ctx) => {
-    ctx.reply('Получил файл. Пока я в режиме настройки, скоро научусь его обрабатывать!');
+    ctx.reply('Получил файл. Пока я в режиме настройки, используй кнопку "Открыть DocDog" для обработки!');
   });
 
   // Handle errors
@@ -37,23 +38,28 @@ if (botToken && !disableBot) {
     console.error(`Tg Error for ${ctx.updateType}`, err);
   });
 
-  const startBot = async () => {
-    try {
-      // Small delay to let previous instances disconnect if server restarted quickly
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      await bot?.launch();
-      console.log('Telegram bot started successfully');
-    } catch (err: any) {
-      if (err.response?.error_code === 409) {
-        console.warn('Telegram Bot Conflict: Another instance is running (409). Check your production server or other dev instances.');
-      } else {
-        console.error('Failed to start Telegram bot:', err);
-      }
+  // Use Webhook instead of Polling to avoid 409 Conflict
+  if (appUrl) {
+    const secretPath = `/telegraf/${bot.secretPathComponent()}`;
+    app.use(bot.webhookCallback(secretPath));
+    
+    bot.telegram.setWebhook(`${appUrl}${secretPath}`).then(() => {
+      console.log(`Telegram bot webhook set to: ${appUrl}${secretPath}`);
+    }).catch(err => {
+      console.error('Failed to set Telegram webhook:', err);
+    });
+  } else {
+    // Fallback to polling ONLY in development
+    if (process.env.NODE_ENV !== 'production') {
+      bot.launch().then(() => {
+        console.log('Telegram bot started via polling (Dev Mode)');
+      }).catch(err => {
+        console.error('Failed to start Telegram bot polling:', err);
+      });
+    } else {
+      console.warn('Bot: RENDER_EXTERNAL_URL not found, webhook not set.');
     }
-  };
-
-  startBot();
+  }
 
   // Enable graceful stop
   process.once('SIGINT', () => bot?.stop('SIGINT'));
@@ -85,6 +91,8 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
     const mergeMode = req.body.mergeMode === 'true';
     const telegramUserId = req.body.telegramUserId;
     
+    console.log(`Conversion request: toFormat=${toFormat}, mergeMode=${mergeMode}, tgId=${telegramUserId}`);
+
     if (toFormat === 'PDF') {
       const pdfDoc = await PDFDocument.create();
 
@@ -93,26 +101,34 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
           const imageBuffer = file.buffer;
           let image;
           
-          if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') {
-            image = await pdfDoc.embedJpg(imageBuffer);
-          } else if (file.mimetype === 'image/png') {
-            image = await pdfDoc.embedPng(imageBuffer);
-          } else {
-            const pngBuffer = await sharp(imageBuffer).png().toBuffer();
-            image = await pdfDoc.embedPng(pngBuffer);
-          }
+          try {
+            if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') {
+              image = await pdfDoc.embedJpg(imageBuffer);
+            } else if (file.mimetype === 'image/png') {
+              image = await pdfDoc.embedPng(imageBuffer);
+            } else {
+              const pngBuffer = await sharp(imageBuffer).png().toBuffer();
+              image = await pdfDoc.embedPng(pngBuffer);
+            }
 
-          const page = pdfDoc.addPage([image.width, image.height]);
-          page.drawImage(image, {
-            x: 0,
-            y: 0,
-            width: image.width,
-            height: image.height,
-          });
+            const page = pdfDoc.addPage([image.width, image.height]);
+            page.drawImage(image, {
+              x: 0,
+              y: 0,
+              width: image.width,
+              height: image.height,
+            });
+          } catch (err) {
+            console.error(`Error embedding file ${file.originalname}:`, err);
+          }
         } else if (file.mimetype === 'application/pdf') {
-          const pdf = await PDFDocument.load(file.buffer);
-          const copiedPages = await pdfDoc.copyPages(pdf, pdf.getPageIndices());
-          copiedPages.forEach((page) => pdfDoc.addPage(page));
+          try {
+            const pdf = await PDFDocument.load(file.buffer);
+            const copiedPages = await pdfDoc.copyPages(pdf, pdf.getPageIndices());
+            copiedPages.forEach((page) => pdfDoc.addPage(page));
+          } catch (err) {
+            console.error(`Error merging PDF ${file.originalname}:`, err);
+          }
         }
       }
 
@@ -122,24 +138,27 @@ app.post('/api/convert', upload.array('files'), async (req: Request, res: Respon
 
       if (telegramUserId && bot) {
         try {
+          console.log(`Attempting to send document to Telegram user ${telegramUserId}...`);
           await bot.telegram.sendDocument(telegramUserId, {
             source: buffer,
             filename: filename
           });
+          console.log('Document sent to Telegram successfully');
           return res.json({ 
             success: true, 
             sentToTelegram: true,
             message: 'Файл отправлен в ваш чат с ботом' 
           });
-        } catch (tgError) {
-          console.error('Telegram send error:', tgError);
-          // Fallback to direct download if Telegram fails
+        } catch (tgError: any) {
+          console.error('Telegram send document error:', tgError.message || tgError);
+          // If sending to Telegram fails, we fall back to giving the file directly
         }
       }
 
+      console.log('Falling back to direct download');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
+      return res.send(buffer);
     } else {
       // Basic fallback for other formats - if single file, just return "converted"
       // In a real app we'd do more, but for now let's handle the PDF use case which is the most common

@@ -182,7 +182,15 @@ const ConverterUI: React.FC = () => {
         const result = await response.json();
         if (result.sentToTelegram) {
           setSentToTelegram(true);
-          if (tg?.showAlert) tg.showAlert('Файл успешно отправлен в ваш чат с ботом!');
+          // If in Telegram, we can show a main button or close the app
+          if (tg) {
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            if (tg.MainButton) {
+              tg.MainButton.setText('Вернуться в чат');
+              tg.MainButton.show();
+              tg.MainButton.onClick(() => tg.close());
+            }
+          }
         }
       } else {
         const blob = await response.blob();
@@ -202,6 +210,14 @@ const ConverterUI: React.FC = () => {
   };
 
   const handleDownload = () => {
+    if (sentToTelegram) {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg) {
+        tg.close();
+      }
+      return;
+    }
+
     if (!convertedBlob) return;
     
     const url = URL.createObjectURL(convertedBlob);
@@ -225,6 +241,13 @@ const ConverterUI: React.FC = () => {
     setProcessingState('idle');
     setProgress(0);
     setConvertedBlob(null);
+    setSentToTelegram(false);
+
+    // Hide Telegram MainButton if it was shown
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.MainButton) {
+      tg.MainButton.hide();
+    }
   };
 
   const formatSize = (bytes: number) => {
@@ -667,19 +690,27 @@ const ConverterUI: React.FC = () => {
                           />
                         </div>
 
+                        <div className="text-center space-y-2 mb-2">
+                          <h4 className="text-xl font-display font-black text-white">Готово!</h4>
+                          <p className="text-sm text-white/40 font-medium tracking-wide">
+                            {sentToTelegram 
+                              ? 'Файл успешно отправлен в ваш чат с ботом. Закройте приложение, чтобы увидеть его.' 
+                              : 'Ваш файл готов к загрузке.'}
+                          </p>
+                        </div>
+
                         <button 
                           onClick={handleDownload}
-                          disabled={sentToTelegram && !convertedBlob}
                           className={`w-full py-5 rounded-3xl font-extrabold text-lg shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-all ${
                             sentToTelegram 
-                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
+                            ? 'bg-blue-500 text-white hover:bg-blue-600' 
                             : 'bg-white text-black hover:bg-white/90'
                           }`}
                         >
                           {sentToTelegram ? (
                             <>
                               <Send size={24} />
-                              Отправлено в чат
+                              Перейти в чат
                             </>
                           ) : (
                             <>
