@@ -2,6 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Document, Packer, Paragraph, ImageRun, TextRun } from "docx";
 import Tesseract from 'tesseract.js';
+import * as pdfjs from 'pdfjs-dist';
+
+// Set up pdfjs worker
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
 import { 
   Upload, 
   FileText, 
@@ -145,26 +150,59 @@ const ConverterUI: React.FC = () => {
     }
   }, [processingState, sentToTelegram]);
 
+  const convertPdfToImages = async (file: File): Promise<Blob[]> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+    const blobs: Blob[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 }); 
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({ 
+        canvasContext: context, 
+        viewport: viewport,
+        canvas: canvas as any 
+      } as any).promise;
+      
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (blob) blobs.push(blob);
+    }
+    return blobs;
+  };
+
   const convertToDocxOnClient = async (fileItems: FileItem[]) => {
     const children: any[] = [];
     
     for (let i = 0; i < fileItems.length; i++) {
       const fileItem = fileItems[i];
       // Update progress
-      setProgress(Math.round(((i + 1) / fileItems.length) * 100));
+      setProgress(Math.round(((i + 0.1) / fileItems.length) * 100));
 
-      if (fileItem.file.type.startsWith('image/')) {
+      const isPdf = fileItem.file.type === 'application/pdf' || fileItem.name.toLowerCase().endsWith('.pdf');
+      const imageBlobs: Blob[] = isPdf ? await convertPdfToImages(fileItem.file) : [fileItem.file];
+
+      for (let j = 0; j < imageBlobs.length; j++) {
+        const blob = imageBlobs[j];
+        const isFirstPageOfFile = j === 0;
+
         try {
           if (ocrEnabled) {
             const result = await Tesseract.recognize(
-              fileItem.file,
+              blob,
               'rus+eng',
               { logger: m => console.log('OCR Status:', m) }
             );
             
             children.push(
               new Paragraph({
-                pageBreakBefore: i > 0,
+                pageBreakBefore: i > 0 || !isFirstPageOfFile,
                 children: [
                   new TextRun({
                     text: result.data.text,
@@ -175,11 +213,11 @@ const ConverterUI: React.FC = () => {
               })
             );
           } else {
-            const arrayBuffer = await fileItem.file.arrayBuffer();
+            const arrayBuffer = await blob.arrayBuffer();
             
             // Get image dimensions to maintain aspect ratio
             const img = new Image();
-            const url = URL.createObjectURL(fileItem.file);
+            const url = URL.createObjectURL(blob);
             await new Promise((resolve) => {
               img.onload = resolve;
               img.src = url;
@@ -195,7 +233,7 @@ const ConverterUI: React.FC = () => {
 
             children.push(
               new Paragraph({
-                pageBreakBefore: i > 0,
+                pageBreakBefore: i > 0 || !isFirstPageOfFile,
                 children: [
                   new ImageRun({
                     data: new Uint8Array(arrayBuffer),
@@ -209,16 +247,10 @@ const ConverterUI: React.FC = () => {
             );
           }
         } catch (err) {
-          console.error('Error processing image for DOCX:', err);
+          console.error('Error processing image/page for DOCX:', err);
         }
-      } else {
-        children.push(
-          new Paragraph({
-            pageBreakBefore: i > 0,
-            text: `File: ${fileItem.name} (Non-image files are not supported in client-side DOCX conversion yet)`
-          })
-        );
       }
+      setProgress(Math.round(((i + 1) / fileItems.length) * 100));
     }
 
     const doc = new Document({
@@ -253,14 +285,9 @@ const ConverterUI: React.FC = () => {
 
     const isAllImages = files.every(f => f.file.type.startsWith('image/'));
     
-    // Block PDF to DOCX as requested - strictly only allow JPG/PNG for phone DOCX conversion
-    if (toFormat === 'DOCX' && !isAllImages) {
-      const msg = "PDF нельзя конвертировать в DOCX на телефоне. Используйте только JPG/PNG.";
-      if (tg?.showAlert) tg.showAlert(msg);
-      else alert(msg);
-      return; 
-    }
-
+    // We now support PDF for DOCX on client via pdf-to-image rendering
+    // No more strict block alert.
+    
     setProcessingState('processing');
     setProgress(0);
     setSentToTelegram(false);
@@ -273,8 +300,8 @@ const ConverterUI: React.FC = () => {
     try {
       let finalBlob: Blob;
 
-      if (toFormat === 'DOCX' && isAllImages) {
-        // CLIENT-SIDE CONVERSION for DOCX (Images only)
+      if (toFormat === 'DOCX') {
+        // CLIENT-SIDE CONVERSION for DOCX (Supports Images and PDF via rendering)
         console.log('Client: Starting client-side DOCX conversion');
         finalBlob = await convertToDocxOnClient(files);
       } else {
